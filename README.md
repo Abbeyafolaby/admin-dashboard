@@ -40,99 +40,85 @@ npm run migrate
 npm start
 ```
 
-## API Usage
-
-The API runs on `http://localhost:8000` by default. Below are the available endpoints with example requests:
-
 ### Authentication Endpoints
 
-#### 1. User Registration
-Register a new user account.
+## Postman Testing Guide
 
-**Endpoint:** `POST /api/auth/signup`
+Use this section to test the newly added routes with Postman. Keep the usage patterns above as a guide for building requests.
 
-**Request Body:**
-```json
-{
-    "name": "Jonathan Kelly",
-    "email": "johnkelly@gmail.com",
-    "password": "@Johkely@1234"
-}
-```
+Note: The server defaults to port `8000` unless `PORT` is set. If you used the previous defaults, verify your running port.
 
-#### 2. User Login
-Authenticate a user and receive access tokens.
+### Recommended Postman Environment Variables
 
-**Endpoint:** `POST /api/auth/login`
+- `baseUrl`: `http://localhost:8000`
+- `accessToken`: set after login
+- `refreshToken`: set after login
+- `userId`: set to a target user when needed
+- `logId`: set to a target log when needed
 
-**Request Body:**
-```json
-{
-    "email": "johnkelly@gmail.com",
-    "password": "@Johkely@1234"
-}
-```
+In Postman, add `Authorization: Bearer {{accessToken}}` to requests that require auth.
 
-**Response:**
-The login endpoint returns both access and refresh tokens. Save these for subsequent requests.
+### Roles Overview
 
-#### 3. Refresh Access Token
-Refresh an expired access token using the refresh token.
+- `user`: can access own profile/data only
+- `manager`: can view stats; can view/export logs but must apply at least one filter (user/actionType/from/to)
+- `admin`: full access – manage users, view stats, delete logs
 
-**Endpoint:** `POST /api/auth/refresh`
+Login is rate-limited (max 10 attempts per 15 minutes per IP).
 
-**Request Body:**
-```json
-{
-    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
+### Auth Flow in Postman
 
-#### 4. User Logout
-Logout a user and invalidate their refresh token.
+1. Signup: `POST {{baseUrl}}/api/auth/signup`
+   - Body (JSON):
+     ```json
+     { "name": "Jane Admin", "email": "jane@example.com", "password": "Str0ngP@ss!" }
+     ```
+2. Login: `POST {{baseUrl}}/api/auth/login`
+   - Body (JSON):
+     ```json
+     { "email": "jane@example.com", "password": "Str0ngP@ss!" }
+     ```
+   - From the response, copy `accessToken` → `{{accessToken}}`, `refreshToken` → `{{refreshToken}}` in your environment.
+3. Me: `GET {{baseUrl}}/api/users/me` (Header: `Authorization: Bearer {{accessToken}}`)
+4. Refresh: `POST {{baseUrl}}/api/auth/refresh`
+   - Body (JSON): `{ "refreshToken": "{{refreshToken}}" }`
+5. Logout: `POST {{baseUrl}}/api/auth/logout`
+   - Body (JSON): `{ "refreshToken": "{{refreshToken}}" }`
 
-**Endpoint:** `POST /api/auth/logout`
+### Bootstrap Admin (one-time)
 
-**Request Body:**
-```json
-{
-    "refreshToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9..."
-}
-```
+To test admin-only routes, set one user to role `admin` directly in MongoDB, then login again to obtain a token containing `role: admin`.
 
-### Protected Endpoints
+### Users (Admin)
 
-#### Get Current User Profile
-Access protected user information.
+- List: `GET {{baseUrl}}/api/users`
+- Update Role: `PATCH {{baseUrl}}/api/users/{{userId}}/role`
+  - Body (JSON): `{ "role": "manager" }` (allowed: `user|manager|admin`)
+- Delete: `DELETE {{baseUrl}}/api/users/{{userId}}`
 
-**Endpoint:** `GET /api/admin/me`
+### Stats (Admin, Manager)
 
-**Headers Required:**
-- `Authorization: Bearer YOUR_ACCESS_TOKEN`
+- Users by role: `GET {{baseUrl}}/api/stats/users`
+- Login stats (success vs failed): `GET {{baseUrl}}/api/stats/logins`
+- Active users in last 24h: `GET {{baseUrl}}/api/stats/active-users`
 
-### Authentication Flow
+### Activity Logs
 
-1. **Register** a new user account using `/api/auth/signup`
-2. **Login** with credentials to receive access and refresh tokens via `/api/auth/login`
-3. **Use the access token** in the Authorization header for protected endpoints
-4. **Refresh tokens** when they expire using `/api/auth/refresh`
-5. **Logout** to invalidate tokens using `/api/auth/logout`
+Recorded actions: `login_success`, `login_failed`, `create_user`, `update_role`, `delete_user`.
 
-### Token Usage
+- View (Admin, Manager): `GET {{baseUrl}}/api/logs`
+  - Managers must provide at least one filter:
+    - Query params: `user` (ObjectId), `actionType`, `from` (ISO date), `to` (ISO date)
+    - In Postman, set them in the Params tab, e.g. `actionType=login_success&from=2025-09-10&to=2025-09-11`.
+- Export (Admin, Manager): `GET {{baseUrl}}/api/logs/export`
+  - Query params: `format=csv|json` plus optional filters above
+  - In Postman, choose `Send and Download` to save CSV.
+- Delete one (Admin): `DELETE {{baseUrl}}/api/logs/{{logId}}`
+- Bulk delete (Admin): `DELETE {{baseUrl}}/api/logs`
+  - Optional query filters: `from`, `to`, `user`, `actionType`
 
-For all protected endpoints, include the access token in the Authorization header:
-```
-Authorization: Bearer YOUR_ACCESS_TOKEN
-```
+### Notes
 
-
-## Technologies Used
-
-- **Node.js** - Runtime environment
-- **Express.js** - Web framework
-- **MongoDB** - Database
-- **JWT** - JSON Web Tokens for authentication
-
-## Author
-
-**Abiodun Afolabi** - Backend Developer
+- Always include `Authorization: Bearer {{accessToken}}` for protected endpoints.
+- Login route has rate limiting; multiple failed attempts will be temporarily blocked.
+- Behind a proxy, the app trusts proxy IPs for accurate client IP logging.
