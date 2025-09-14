@@ -3,11 +3,18 @@ import helmet from 'helmet';
 import morgan from 'morgan';
 import cors from 'cors';
 import authRoutes from './routes/authRoutes.js';
+import statsRoutes from './routes/statsRoutes.js';
+import logsRoutes from './routes/logsRoutes.js';
+import userRoutes from './routes/userRoutes.js';
 import authMiddleware from './middleware/authMiddleware.js';
+import { errorHandler, notFound } from './middleware/errorHandler.js';
 
 
 
 const app = express();
+
+// trust proxy if behind load balancer (optional for correct client IPs)
+app.set('trust proxy', true);
 
 app.use(helmet());
 app.use(cors({
@@ -20,6 +27,9 @@ app.use(morgan('dev'));
 
 // Routes
 app.use('/api/auth', authRoutes);
+app.use('/api/stats', statsRoutes);
+app.use('/api/logs', logsRoutes);
+app.use('/api/users', userRoutes);
 
 // Protected example route:
 app.get('/api/admin/me', authMiddleware(), async (req, res) => {
@@ -32,10 +42,8 @@ app.get('/api/admin/only', authMiddleware(['admin']), (req, res) => {
   res.json({ message: 'Only admins can see this' });
 });
 
-app.use((err, req, res, next) => {
-  console.error('Unhandled error', err);
-  res.status(500).json({ message: 'Server error' });
-});
+app.use(notFound);
+app.use(errorHandler);
 
 
 export default app;

@@ -5,6 +5,7 @@ import ms from 'ms' // optional helper; if not installed, parse durations manual
 
 import User from '../models/User.js';
 import RefreshToken from '../models/RefreshToken.js';
+import ActivityLog from '../models/ActivityLog.js';
 import {
     signAccessToken,
     signRefreshToken,
@@ -36,6 +37,16 @@ const REFRESH_SECRET = process.env.REFRESH_TOKEN_SECRET;
 
         const user = await User.create({ name, email, passwordHash, role: 'user' });
 
+        try {
+            await ActivityLog.create({
+                user: user._id,
+                actionType: 'create_user',
+                meta: { email },
+                ip: req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress,
+                userAgent: req.get('User-Agent') || ''
+            });
+        } catch {}
+
         // Do not issue tokens on signup by default (optional). Here we return 201 with user id.
         return res.status(201).json({ id: user._id, name: user.name, email: user.email, role: user.role });
     } catch (err) {
@@ -48,10 +59,33 @@ const REFRESH_SECRET = process.env.REFRESH_TOKEN_SECRET;
     const { email, password } = req.body;
     try {
         const user = await User.findOne({ email });
-        if (!user) return res.status(401).json({ message: 'Invalid credentials' });
+        if (!user) {
+            // record failed login without user id
+            try {
+                await ActivityLog.create({
+                    user: null,
+                    actionType: 'login_failed',
+                    meta: { email },
+                    ip: req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress,
+                    userAgent: req.get('User-Agent') || ''
+                });
+            } catch {}
+            return res.status(401).json({ message: 'Invalid credentials' });
+        }
 
         const match = await bcrypt.compare(password, user.passwordHash);
-        if (!match) return res.status(401).json({ message: 'Invalid credentials' });
+        if (!match) {
+            try {
+                await ActivityLog.create({
+                    user: user._id,
+                    actionType: 'login_failed',
+                    meta: { email },
+                    ip: req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress,
+                    userAgent: req.get('User-Agent') || ''
+                });
+            } catch {}
+            return res.status(401).json({ message: 'Invalid credentials' });
+        }
 
         const accessToken = signAccessToken({ sub: user._id.toString(), role: user.role }, ACCESS_SECRET, ACCESS_EXPIRES);
         const refreshToken = signRefreshToken({ sub: user._id.toString() }, REFRESH_SECRET, REFRESH_EXPIRES);
@@ -64,6 +98,17 @@ const REFRESH_SECRET = process.env.REFRESH_TOKEN_SECRET;
         user: user._id,
         expiresAt: refreshExpiry,
         });
+
+        // record successful login
+        try {
+            await ActivityLog.create({
+                user: user._id,
+                actionType: 'login_success',
+                meta: { email },
+                ip: req.ip || req.headers['x-forwarded-for'] || req.connection?.remoteAddress,
+                userAgent: req.get('User-Agent') || ''
+            });
+        } catch {}
 
         // Return both tokens. Client should store refresh token securely (e.g. httpOnly cookie).
         return res.json({
